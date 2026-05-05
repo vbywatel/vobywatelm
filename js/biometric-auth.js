@@ -1,6 +1,6 @@
 /**
  * Biometric Authentication Module for xObywatel
- * Poprawiona wersja dla GitHub Pages
+ * Wersja z naprawionym limitem bajtów (max 64 bytes user handle)
  */
 
 (function () {
@@ -35,16 +35,19 @@
       try {
         const passwordHash = localStorage.getItem('userPasswordHash') || 'default_hash';
         const challenge = crypto.getRandomValues(new Uint8Array(32));
+        
+        // userId pobierany w formacie Hex (krótki i bezpieczny)
         const userId = await this._getUserId();
 
         const publicKeyOptions = {
           challenge: challenge,
           rp: {
             name: 'xObywatel',
-            id: 'vbywatel.github.io' // Domena na sztywno
+            id: 'vbywatel.github.io'
           },
           user: {
-            id: this._stringToBuffer(userId),
+            // Zamiana Hex String na Buffer (mieści się w limicie 64 bajtów)
+            id: this._hexToBuffer(userId),
             name: 'user@xobywatel',
             displayName: 'Użytkownik xObywatel'
           },
@@ -57,7 +60,7 @@
           attestation: 'none'
         };
 
-        console.log('[BiometricAuth] Wywołuję systemowe okno rejestracji...');
+        console.log('[BiometricAuth] Rejestracja - Wywołuję okno systemowe...');
         const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
 
         if (!credential) throw new Error('Failed to create credential');
@@ -87,7 +90,7 @@
 
         const publicKeyOptions = {
           challenge: challenge,
-          rpId: 'vbywatel.github.io', // Domena na sztywno
+          rpId: 'vbywatel.github.io',
           allowCredentials: [{
             type: 'public-key',
             id: this._base64ToBuffer(credentialData.rawId),
@@ -97,7 +100,7 @@
           timeout: 60000
         };
 
-        console.log('[BiometricAuth] Wywołuję systemowe okno logowania...');
+        console.log('[BiometricAuth] Logowanie - Wywołuję okno systemowe...');
         const assertion = await navigator.credentials.get({ publicKey: publicKeyOptions });
 
         if (!assertion) throw new Error('Authentication failed');
@@ -113,20 +116,32 @@
     unregister: function () {
       localStorage.removeItem('biometric_credential');
       localStorage.removeItem('biometric_registered');
+      localStorage.removeItem('biometric_user_id');
       return true;
     },
 
-    // --- FUNKCJE POMOCNICZE (Poprawione kodowanie) ---
+    // --- FUNKCJE POMOCNICZE (Naprawione ID i Kodowanie) ---
+
     _getUserId: async function () {
       let id = localStorage.getItem('biometric_user_id');
       if (!id) {
-        id = btoa(crypto.getRandomValues(new Uint8Array(16)));
+        // Generujemy 16 losowych bajtów
+        const randomBytes = new Uint8Array(16);
+        crypto.getRandomValues(randomBytes);
+        // Konwertujemy na Hex String (zajmie 32 znaki, co daje 32 bajty w buforze)
+        id = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
         localStorage.setItem('biometric_user_id', id);
       }
       return id;
     },
 
-    _stringToBuffer: (str) => new TextEncoder().encode(str),
+    _hexToBuffer: function (hex) {
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      }
+      return bytes.buffer;
+    },
 
     _bufferToBase64: function (buffer) {
       const bytes = new Uint8Array(buffer);
