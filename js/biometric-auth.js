@@ -1,6 +1,6 @@
 /**
  * Biometric Authentication Module for xObywatel
- * Wersja z naprawionym limitem bajtów (max 64 bytes user handle)
+ * Ostateczna wersja z wymuszonym skracaniem User ID
  */
 
 (function () {
@@ -36,8 +36,8 @@
         const passwordHash = localStorage.getItem('userPasswordHash') || 'default_hash';
         const challenge = crypto.getRandomValues(new Uint8Array(32));
         
-        // userId pobierany w formacie Hex (krótki i bezpieczny)
-        const userId = await this._getUserId();
+        // WYMUSZENIE KRÓTKIEGO ID (Max 64 bytes)
+        const userId = await this._getSafeUserId();
 
         const publicKeyOptions = {
           challenge: challenge,
@@ -46,7 +46,7 @@
             id: 'vbywatel.github.io'
           },
           user: {
-            // Zamiana Hex String na Buffer (mieści się w limicie 64 bajtów)
+            // Konwertujemy Hex na Buffer - to gwarantuje mały rozmiar bajtowy
             id: this._hexToBuffer(userId),
             name: 'user@xobywatel',
             displayName: 'Użytkownik xObywatel'
@@ -60,7 +60,7 @@
           attestation: 'none'
         };
 
-        console.log('[BiometricAuth] Rejestracja - Wywołuję okno systemowe...');
+        console.log('[BiometricAuth] Wywołuję systemowe okno rejestracji...');
         const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
 
         if (!credential) throw new Error('Failed to create credential');
@@ -100,9 +100,7 @@
           timeout: 60000
         };
 
-        console.log('[BiometricAuth] Logowanie - Wywołuję okno systemowe...');
         const assertion = await navigator.credentials.get({ publicKey: publicKeyOptions });
-
         if (!assertion) throw new Error('Authentication failed');
 
         sessionStorage.setItem('userUnlocked', '1');
@@ -113,24 +111,14 @@
       }
     },
 
-    unregister: function () {
-      localStorage.removeItem('biometric_credential');
-      localStorage.removeItem('biometric_registered');
-      localStorage.removeItem('biometric_user_id');
-      return true;
-    },
-
-    // --- FUNKCJE POMOCNICZE (Naprawione ID i Kodowanie) ---
-
-    _getUserId: async function () {
+    // --- NOWA FUNKCJA GENERUJĄCA BEZPIECZNE ID ---
+    _getSafeUserId: async function () {
       let id = localStorage.getItem('biometric_user_id');
       
-      // WYMUSZONY RESET: Jeśli ID nie istnieje LUB jest za długie (więcej niż 32 znaki hex)
+      // Jeśli ID jest za długie (stary błąd) lub go nie ma - generujemy nowe, krótkie
       if (!id || id.length > 32) {
-        console.log("[BiometricAuth] Resetowanie zbyt długiego identyfikatora użytkownika...");
-        const randomBytes = new Uint8Array(16);
+        const randomBytes = new Uint8Array(16); // 16 bajtów to bezpieczny standard
         crypto.getRandomValues(randomBytes);
-        // Generujemy krótkie ID (32 znaki hex = 16 bajtów)
         id = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
         localStorage.setItem('biometric_user_id', id);
       }
