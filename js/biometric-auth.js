@@ -124,11 +124,13 @@
 
     _getUserId: async function () {
       let id = localStorage.getItem('biometric_user_id');
-      if (!id) {
-        // Generujemy 16 losowych bajtów
+      
+      // WYMUSZONY RESET: Jeśli ID nie istnieje LUB jest za długie (więcej niż 32 znaki hex)
+      if (!id || id.length > 32) {
+        console.log("[BiometricAuth] Resetowanie zbyt długiego identyfikatora użytkownika...");
         const randomBytes = new Uint8Array(16);
         crypto.getRandomValues(randomBytes);
-        // Konwertujemy na Hex String (zajmie 32 znaki, co daje 32 bajty w buforze)
+        // Generujemy krótkie ID (32 znaki hex = 16 bajtów)
         id = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
         localStorage.setItem('biometric_user_id', id);
       }
