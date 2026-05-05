@@ -1,17 +1,28 @@
+/**
+ * Biometric Authentication Module for xObywatel
+ * Poprawiona wersja dla GitHub Pages
+ */
+
 (function () {
   'use strict';
 
   window.BiometricAuth = {
     isAvailable: function () {
-      return window.PublicKeyCredential !== undefined;
+      return (
+        window.PublicKeyCredential !== undefined &&
+        typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function'
+      );
     },
 
     checkPlatformSupport: async function () {
       if (!this.isAvailable()) return false;
       try {
-        // Sprawdza czy urządzenie w ogóle posiada czytnik
-        return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      } catch (e) { return false; }
+        const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+        return available;
+      } catch (error) {
+        console.error('[BiometricAuth] Error checking support:', error);
+        return false;
+      }
     },
 
     isRegistered: function () {
@@ -19,34 +30,116 @@
     },
 
     register: async function () {
+      if (!this.isAvailable()) throw new Error('Biometric not available');
+
       try {
-        // SYMULACJA DLA GITHUB PAGES:
-        // Prawdziwy WebAuthn na .github.io często rzuca SecurityError.
-        // Jeśli chcesz tylko efektu wizualnego, użyjemy "sztucznej" rejestracji:
-        
-        console.log('[BiometricAuth] Symulacja rejestracji...');
-        
-        // Zapisujemy, że biometria jest aktywna
+        const passwordHash = localStorage.getItem('userPasswordHash') || 'default_hash';
+        const challenge = crypto.getRandomValues(new Uint8Array(32));
+        const userId = await this._getUserId();
+
+        const publicKeyOptions = {
+          challenge: challenge,
+          rp: {
+            name: 'xObywatel',
+            id: 'vbywatel.github.io' // Domena na sztywno
+          },
+          user: {
+            id: this._stringToBuffer(userId),
+            name: 'user@xobywatel',
+            displayName: 'Użytkownik xObywatel'
+          },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: {
+            authenticatorAttachment: 'platform',
+            userVerification: 'required'
+          },
+          timeout: 60000,
+          attestation: 'none'
+        };
+
+        console.log('[BiometricAuth] Wywołuję systemowe okno rejestracji...');
+        const credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
+
+        if (!credential) throw new Error('Failed to create credential');
+
+        const credentialData = {
+          id: credential.id,
+          rawId: this._bufferToBase64(credential.rawId),
+          type: credential.type,
+          passwordHash: passwordHash
+        };
+
+        localStorage.setItem('biometric_credential', JSON.stringify(credentialData));
         localStorage.setItem('biometric_registered', 'true');
-        localStorage.setItem('userPasswordHash', 'zalogowano_automatycznie');
-        
-        return true; 
+        return true;
       } catch (error) {
-        console.error('[BiometricAuth] Błąd:', error);
+        console.error('[BiometricAuth] Registration error:', error);
         throw error;
       }
     },
 
     authenticate: async function () {
-      // Przy logowaniu od razu wpuszczamy użytkownika
-      sessionStorage.setItem('userUnlocked', '1');
-      sessionStorage.setItem('auth_validated', 'true');
-      return true;
+      if (!this.isRegistered()) throw new Error('Not registered');
+
+      try {
+        const credentialData = JSON.parse(localStorage.getItem('biometric_credential'));
+        const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+        const publicKeyOptions = {
+          challenge: challenge,
+          rpId: 'vbywatel.github.io', // Domena na sztywno
+          allowCredentials: [{
+            type: 'public-key',
+            id: this._base64ToBuffer(credentialData.rawId),
+            transports: ['internal']
+          }],
+          userVerification: 'required',
+          timeout: 60000
+        };
+
+        console.log('[BiometricAuth] Wywołuję systemowe okno logowania...');
+        const assertion = await navigator.credentials.get({ publicKey: publicKeyOptions });
+
+        if (!assertion) throw new Error('Authentication failed');
+
+        sessionStorage.setItem('userUnlocked', '1');
+        return credentialData.passwordHash;
+      } catch (error) {
+        console.error('[BiometricAuth] Auth error:', error);
+        throw error;
+      }
     },
 
     unregister: function () {
+      localStorage.removeItem('biometric_credential');
       localStorage.removeItem('biometric_registered');
       return true;
+    },
+
+    // --- FUNKCJE POMOCNICZE (Poprawione kodowanie) ---
+    _getUserId: async function () {
+      let id = localStorage.getItem('biometric_user_id');
+      if (!id) {
+        id = btoa(crypto.getRandomValues(new Uint8Array(16)));
+        localStorage.setItem('biometric_user_id', id);
+      }
+      return id;
+    },
+
+    _stringToBuffer: (str) => new TextEncoder().encode(str),
+
+    _bufferToBase64: function (buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    },
+
+    _base64ToBuffer: function (base64) {
+      const binary = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
     }
   };
 })();
