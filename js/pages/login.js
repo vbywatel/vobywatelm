@@ -1,3 +1,8 @@
+/**
+ * xObywatel - login.js
+ * Pełna integracja biometrii i logiki logowania
+ */
+
 (function () {
   function updateVh() {
     try {
@@ -26,7 +31,7 @@ function showPwdError(msg) {
     if (!el) return;
     if (msg) {
       el.textContent = msg;
-      el.style.display = "";
+      el.style.display = "block";
     } else {
       el.textContent = "";
       el.style.display = "none";
@@ -48,38 +53,26 @@ async function handleLoginSubmit(e) {
   var input = document.getElementById("passwordInput");
   var pwd = input ? input.value : "";
   
-  // Nawet jeśli pole jest puste, pozwalamy przejść dalej
   if (!pwd) {
     pwd = "bypass_active"; 
   }
 
   try {
-    // Logika "zawsze poprawne" - ustawiamy flagi sukcesu
     localStorage.setItem('userPasswordHash', 'zalogowano_automatycznie'); 
     showPwdError("");
-
-    // ZAPISYWANIE SESJI (ważne dla innych stron)
     sessionStorage.setItem("userUnlocked", "1");
-    sessionStorage.setItem("from-login", "true");
     sessionStorage.setItem("auth_validated", "true");
 
-    // SPRAWDZANIE BIOMETRII (zostawiamy oryginalną logikę)
-    if (typeof window.setupBiometricAfterLogin === 'function' && window.BiometricAuth) {
-      BiometricAuth.checkPlatformSupport().then(function(isAvailable) {
-        // Jeśli biometria jest dostępna, a nie jest jeszcze skonfigurowana:
-        if (isAvailable && !BiometricAuth.isRegistered()) {
-          setupBiometricAfterLogin(); 
-        } else {
-          // Jeśli już zarejestrowana lub niedostępna, idź do dokumentów
-          redirectToDashboard(); 
-        }
-      }).catch(function() {
-        redirectToDashboard();
-      });
+    if (typeof window.BiometricAuth !== 'undefined') {
+      const isAvailable = await BiometricAuth.checkPlatformSupport();
+      if (isAvailable && !BiometricAuth.isRegistered()) {
+        setupBiometricAfterLogin(); 
+      } else {
+        redirectToDashboard(); 
+      }
     } else {
       redirectToDashboard();
     }
-    
   } catch (err) {
     showPwdError("Błąd aplikacji.");
     console.error(err);
@@ -100,6 +93,7 @@ function togglePasswordVisibility() {
   }
 }
 
+// Przywitanie
 (function () {
   function setGreeting() {
     var title = document.querySelector(".login__title");
@@ -111,14 +105,13 @@ function togglePasswordVisibility() {
   document.addEventListener("DOMContentLoaded", setGreeting);
 })();
 
+// Inicjalizacja Event Listenerów
 document.addEventListener("DOMContentLoaded", function () {
-  // Przycisk "Zaloguj się"
   var loginBtn = document.getElementById("loginBtn");
   if (loginBtn) {
     loginBtn.addEventListener("click", handleLoginSubmit);
   }
   
-  // Logowanie po wciśnięciu Enter
   var passwordInput = document.getElementById("passwordInput");
   if (passwordInput) {
     passwordInput.addEventListener("keypress", function(e) {
@@ -129,12 +122,11 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  // Obsługa kliknięcia "Nie pamiętasz hasła?"
   var forgotBtn = document.getElementById("forgotPasswordBtn");
   if (forgotBtn) {
     forgotBtn.addEventListener("click", function(e) {
-      e.preventDefault(); // Zapobiega odświeżeniu/przeniesieniu
-      showPwdError("Błąd połączenia z serwerem. Sprawdź połączenie internetowe i spróbuj ponownie.");
+      e.preventDefault();
+      showPwdError("Błąd połączenia z serwerem. Spróbuj ponownie.");
     });
   }
 
@@ -143,32 +135,30 @@ document.addEventListener("DOMContentLoaded", function () {
 
 // ========== OBSŁUGA BIOMETRII ==========
 
-function initBiometricUI() {
+async function initBiometricUI() {
   if (typeof window.BiometricAuth === 'undefined') {
     setTimeout(initBiometricUI, 100);
     return;
   }
-  BiometricAuth.checkPlatformSupport().then(function(isAvailable) {
-    if (!isAvailable) {
-      console.log("Biometria zablokowana przez brak HTTPS lub brak obsługi na urządzeniu.");
-      return;
-    }
-    const isRegistered = BiometricAuth.isRegistered();
-    if (isRegistered) {
-      addBiometricLoginButton();
-    } else {
-      showManualBiometricSetupButton(); 
-    }
-  }).catch(function() {});
+
+  const isAvailable = await BiometricAuth.checkPlatformSupport();
+  if (!isAvailable) return;
+
+  if (BiometricAuth.isRegistered()) {
+    addBiometricLoginButton();
+  } else {
+    showManualBiometricSetupButton(); 
+  }
 }
 
 function showManualBiometricSetupButton() {
   const btn = document.getElementById('manualBiometricSetup');
   if (btn) {
     btn.style.display = 'flex';
-    btn.addEventListener('click', function() {
-      showBiometricSetupModal();
-    });
+    // Usuwamy stare listenery przed dodaniem nowego
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', showBiometricSetupModal);
   }
 }
 
@@ -177,7 +167,7 @@ function addBiometricLoginButton() {
   if (!btn) return;
 
   btn.innerHTML = `
-    <img src="assets/icons/aa009_fingerprint.svg" alt="Odcisk palca" class="login__biometric-setup-icon">
+    <img src="assets/icons/aa009_fingerprint.svg" alt="Odcisk" class="login__biometric-setup-icon">
     <span>Zaloguj się biometrycznie</span>
   `;
   
@@ -187,38 +177,32 @@ function addBiometricLoginButton() {
   newBtn.addEventListener('click', handleBiometricLogin);
 }
 
-function handleBiometricLogin(e) {
+async function handleBiometricLogin(e) {
   if (e) e.preventDefault();
   
   const btn = document.getElementById('manualBiometricSetup');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<div class="spinner"></div><span>Uwierzytelnianie...</span>`;
-  }
+  showPwdError(""); // Czyścimy stare błędy
 
-  BiometricAuth.authenticate()
-    .then(function() {
-      showPwdError('');
-      redirectToDashboard();
-    })
-    .catch(function(error) {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = `<img src="assets/icons/aa009_fingerprint.svg" alt="Odcisk palca" class="login__biometric-setup-icon"><span>Zaloguj się biometrycznie</span>`;
-      }
-      showPwdError('Błąd uwierzytelniania biometrycznego.');
-    });
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<div class="spinner"></div><span>Czekam na skan...</span>`;
+    }
+
+    await BiometricAuth.authenticate();
+    redirectToDashboard();
+  } catch (error) {
+    console.error("Błąd uwierzytelniania:", error);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<img src="assets/icons/aa009_fingerprint.svg" alt="Odcisk" class="login__biometric-setup-icon"><span>Zaloguj się biometrycznie</span>`;
+    }
+    showPwdError("Błąd uwierzytelniania: " + error.message);
+  }
 }
 
 function setupBiometricAfterLogin() {
-  if (!BiometricAuth || !BiometricAuth.isAvailable()) return;
-  BiometricAuth.checkPlatformSupport().then(function(isAvailable) {
-    if (!isAvailable || BiometricAuth.isRegistered()) {
-      redirectToDashboard();
-      return;
-    }
-    showBiometricSetupModal();
-  });
+  showBiometricSetupModal();
 }
 
 function showBiometricSetupModal() {
@@ -230,8 +214,8 @@ function showBiometricSetupModal() {
       <div class="biometric-setup-modal__icon">
         <img src="assets/icons/aa009_fingerprint.svg" alt="Biometria">
       </div>
-      <h2 class="biometric-setup-modal__title">Włączyć logowanie biometryczne?</h2>
-      <p class="biometric-setup-modal__text">Zaloguj się szybciej i bezpieczniej używając odcisku palca.</p>
+      <h2 class="biometric-setup-modal__title">Włączyć biometrię?</h2>
+      <p class="biometric-setup-modal__text">Użyj odcisku palca lub FaceID, aby logować się szybciej.</p>
       <div class="biometric-setup-modal__buttons">
         <button class="biometric-setup-modal__btn biometric-setup-modal__btn--secondary" id="biometricSetupCancel">Nie teraz</button>
         <button class="biometric-setup-modal__btn biometric-setup-modal__btn--primary" id="biometricSetupConfirm">Włącz</button>
@@ -242,58 +226,41 @@ function showBiometricSetupModal() {
 
   const style = document.createElement('style');
   style.textContent = `
-    .biometric-setup-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; animation: modalFadeIn 0.3s ease; }
-    @keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .biometric-setup-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .biometric-setup-modal__overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); }
-    .biometric-setup-modal__content { position: relative; background: #fff; border-radius: 20px; padding: 32px 24px 24px; max-width: 360px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: modalSlideUp 0.3s ease; }
-    @keyframes modalSlideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    .biometric-setup-modal__icon { width: 80px; height: 80px; margin: 0 auto 20px; background: linear-gradient(135deg, #165ef8 0%, #1a4fd8 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .biometric-setup-modal__content { position: relative; background: #fff; border-radius: 20px; padding: 32px 24px 24px; max-width: 360px; width: 100%; text-align: center; }
+    .biometric-setup-modal__icon { width: 80px; height: 80px; margin: 0 auto 20px; background: #165ef8; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
     .biometric-setup-modal__icon img { width: 48px; height: 48px; filter: brightness(0) invert(1); }
-    .biometric-setup-modal__title { font-size: 1.35rem; font-weight: 600; margin: 0 0 12px 0; color: #131419; }
-    .biometric-setup-modal__text { font-size: 0.95rem; color: #5f6675; line-height: 1.5; margin: 0 0 28px 0; }
-    .biometric-setup-modal__buttons { display: flex; gap: 12px; }
-    .biometric-setup-modal__btn { flex: 1; padding: 14px 20px; border-radius: 12px; font-size: 1rem; font-weight: 500; border: none; cursor: pointer; }
-    .biometric-setup-modal__btn--secondary { background: rgba(145, 158, 187, 0.15); color: #5f6675; }
+    .biometric-setup-modal__buttons { display: flex; gap: 12px; margin-top: 20px; }
+    .biometric-setup-modal__btn { flex: 1; padding: 14px; border-radius: 12px; border: none; cursor: pointer; font-weight: 500; }
     .biometric-setup-modal__btn--primary { background: #165ef8; color: #fff; }
+    .biometric-setup-modal__btn--secondary { background: #eee; color: #555; }
   `;
   document.head.appendChild(style);
-
-  function closeModalAndRedirect() {
-    modal.style.animation = 'modalFadeIn 0.2s ease reverse';
-    setTimeout(function() {
-      if (modal.parentNode) document.body.removeChild(modal);
-      if (style.parentNode) document.head.removeChild(style);
-      redirectToDashboard();
-    }, 200);
-  }
 
   const confirmBtn = document.getElementById('biometricSetupConfirm');
   const cancelBtn = document.getElementById('biometricSetupCancel');
 
-  
-if (confirmBtn) {
-    confirmBtn.addEventListener('click', function() {
-      // 1. WYMUSZAMY ZAPIS (nawet jeśli techniczna rejestracja rzuci błędem)
-      localStorage.setItem('biometric_registered', 'true');
-      localStorage.setItem('userPasswordHash', 'zalogowano_automatycznie');
+  confirmBtn.addEventListener('click', async function() {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Skanowanie...";
+    
+    try {
+      await BiometricAuth.register();
+      // Dopiero po udanej rejestracji w systemie ustawiamy widok
+      addBiometricLoginButton();
+      document.body.removeChild(modal);
+      redirectToDashboard();
+    } catch (err) {
+      console.error("Rejestracja przerwana:", err);
+      alert("Biometria nie została skonfigurowana: " + err.message);
+      document.body.removeChild(modal);
+      redirectToDashboard();
+    }
+  });
 
-      BiometricAuth.register().then(() => {
-          console.log("Biometria zarejestrowana pomyślnie");
-          addBiometricLoginButton();
-          closeModalAndRedirect();
-      }).catch((err) => {
-          // 2. JEŚLI WYSTĄPI BŁĄD (np. na GitHub Pages)
-          // I tak idziemy dalej, bo flaga 'biometric_registered' została już ustawiona wyżej
-          console.warn("Błąd techniczny biometrii, ale aktywujemy symulację:", err);
-          addBiometricLoginButton();
-          closeModalAndRedirect();
-      });
-    });
-  }
-
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', closeModalAndRedirect);
-  }
+  cancelBtn.addEventListener('click', () => {
+    document.body.removeChild(modal);
+    redirectToDashboard();
+  });
 }
-
-window.setupBiometricAfterLogin = setupBiometricAfterLogin;
